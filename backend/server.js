@@ -16,17 +16,37 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err);
 });
 
-const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+// Parse allowed origins, cleaning up trailing slashes, surrounding quotes, and supporting wildcards
+const allowedOrigins = (process.env.CLIENT_ORIGIN)
   .split(',')
-  .map((origin) => origin.trim());
+  .map((origin) => origin.trim().replace(/^["']|["']$/g, '').replace(/\/$/, ''));
+
+// Helper to check if origin matches an allowed pattern (supporting * wildcards)
+const originMatches = (origin, pattern) => {
+  if (pattern === '*') return true;
+  if (pattern.includes('*')) {
+    const escaped = pattern.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
+    const regexStr = '^' + escaped.replace(/\\\*/g, '.*') + '$';
+    const regex = new RegExp(regexStr, 'i');
+    return regex.test(origin);
+  }
+  return origin.toLowerCase() === pattern.toLowerCase();
+};
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) {
+        return callback(null, true);
+      }
+      const normalizedOrigin = origin.trim().replace(/\/$/, '');
+      const isAllowed = allowedOrigins.some((pattern) => originMatches(normalizedOrigin, pattern));
+
+      if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        console.warn(`[CORS Blocked] Request origin "${origin}" does not match allowed origins:`, allowedOrigins);
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
       }
     },
   })
